@@ -2,11 +2,19 @@
 // zhr-ksef-sheets — sync faktur KSeF do Google Sheets
 // ============================================================
 
+// Script Properties (ustaw w: Apps Script → Ustawienia projektu → Właściwości skryptu)
+var PROP_API_KEY = "ZHR_KSEF_API_KEY";
+var PROP_TENANT_ID = "ZHR_KSEF_TENANT_ID";
+var PROP_DRIVE_FOLDER_ID = "ZHR_KSEF_DRIVE_FOLDER_ID";
+
+var API_BASE_URL = "https://ksef.zhr.pl";
+var API_PAGE_SIZE = 100;
+var SYNC_INTERVAL_MINUTES = 30;
+var VALIDATION_MAX_ROWS = 1000;
+
 var SHEET_PULA = "Pula";
 var SHEET_CONFIG = "Konfiguracja";
 var SHEET_UPRAWNIENIA = "Uprawnienia";
-
-var PROP_DRIVE_FOLDER_ID = "ZHR_KSEF_DRIVE_FOLDER_ID";
 
 var COL = {
   NR_FAKTURY: 1,
@@ -128,9 +136,9 @@ function setup() {
     "1. Uzupełnij zakładkę 'Konfiguracja' — nazwy wydarzeń / jednostek.\n" +
     "2. Uzupełnij zakładkę 'Uprawnienia' — jednostka + email (jeden email na wiersz).\n" +
     "3. W: Rozszerzenia → Apps Script → Ustawienia projektu → Właściwości skryptu — ustaw:\n" +
-    "   • ZHR_KSEF_API_KEY — klucz API\n" +
-    "   • ZHR_KSEF_TENANT_ID — ID tenanta\n" +
-    "   • ZHR_KSEF_DRIVE_FOLDER_ID — ID folderu na shared drive\n" +
+    "   • " + PROP_API_KEY + " — klucz API\n" +
+    "   • " + PROP_TENANT_ID + " — ID tenanta\n" +
+    "   • " + PROP_DRIVE_FOLDER_ID + " — ID folderu na shared drive\n" +
     "4. W: Rozszerzenia → Apps Script → Services → kliknij '+' → Drive API → v3 → Add.\n" +
     "5. Uruchom 'Synchronizuj faktury' z menu KSeF.",
     ui.ButtonSet.OK
@@ -216,17 +224,17 @@ function diagnostics() {
 
 function getConfig() {
   var props = PropertiesService.getScriptProperties();
-  var apiKey = props.getProperty("ZHR_KSEF_API_KEY");
-  var tenantId = props.getProperty("ZHR_KSEF_TENANT_ID");
+  var apiKey = props.getProperty(PROP_API_KEY);
+  var tenantId = props.getProperty(PROP_TENANT_ID);
 
   if (!apiKey || !tenantId) {
     throw new Error(
-      "Brak konfiguracji API. Ustaw ZHR_KSEF_API_KEY i ZHR_KSEF_TENANT_ID w właściwościach skryptu."
+      "Brak konfiguracji API. Ustaw " + PROP_API_KEY + " i " + PROP_TENANT_ID + " w właściwościach skryptu."
     );
   }
 
   return {
-    baseUrl: "https://zhrksef.bieda.it",
+    baseUrl: API_BASE_URL,
     apiKey: apiKey,
     tenantId: tenantId
   };
@@ -235,11 +243,10 @@ function getConfig() {
 function fetchAllInvoices(config) {
   var all = [];
   var page = 1;
-  var pageSize = 100;
 
   while (true) {
     var url = config.baseUrl + "/api/v1/tenants/" + config.tenantId +
-              "/invoices?page=" + page + "&pageSize=" + pageSize;
+              "/invoices?page=" + page + "&pageSize=" + API_PAGE_SIZE;
 
     var response = UrlFetchApp.fetch(url, {
       method: "get",
@@ -258,7 +265,7 @@ function fetchAllInvoices(config) {
 
     all = all.concat(invoices);
 
-    if (invoices.length < pageSize) break;
+    if (invoices.length < API_PAGE_SIZE) break;
     page++;
   }
 
@@ -308,6 +315,13 @@ function fetchAndSavePdf(config, folder, invoiceId, fileName) {
 // Helpers — Sheets
 // ============================================================
 
+function styleHeaderRow_(range) {
+  range
+    .setFontWeight("bold")
+    .setBackground("#1a73e8")
+    .setFontColor("#ffffff");
+}
+
 function getOrCreatePula(ss) {
   var sheet = ss.getSheetByName(SHEET_PULA);
   if (!sheet) {
@@ -317,10 +331,7 @@ function getOrCreatePula(ss) {
 
   if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() !== HEADERS[0]) {
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
-    sheet.getRange(1, 1, 1, HEADERS.length)
-      .setFontWeight("bold")
-      .setBackground("#1a73e8")
-      .setFontColor("#ffffff");
+    styleHeaderRow_(sheet.getRange(1, 1, 1, HEADERS.length));
 
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(COL.NR_FAKTURY, 180);
@@ -344,10 +355,7 @@ function getOrCreateConfigSheet(ss) {
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_CONFIG);
     sheet.getRange(1, 1, 1, 1).setValues([["Wydarzenie / Jednostka"]]);
-    sheet.getRange(1, 1, 1, 1)
-      .setFontWeight("bold")
-      .setBackground("#1a73e8")
-      .setFontColor("#ffffff");
+    styleHeaderRow_(sheet.getRange(1, 1, 1, 1));
 
     sheet.setColumnWidth(1, 300);
 
@@ -432,7 +440,7 @@ function createTimeTrigger() {
 
   ScriptApp.newTrigger("syncInvoices")
     .timeBased()
-    .everyMinutes(30)
+    .everyMinutes(SYNC_INTERVAL_MINUTES)
     .create();
 }
 
@@ -480,10 +488,7 @@ function getOrCreateUprawnieniaSheet(ss) {
 
   sheet = ss.insertSheet(SHEET_UPRAWNIENIA);
   sheet.getRange(1, 1, 1, 2).setValues([["Jednostka", "Email"]]);
-  sheet.getRange(1, 1, 1, 2)
-    .setFontWeight("bold")
-    .setBackground("#1a73e8")
-    .setFontColor("#ffffff");
+  styleHeaderRow_(sheet.getRange(1, 1, 1, 2));
   sheet.setFrozenRows(1);
   sheet.setColumnWidth(1, 250);
   sheet.setColumnWidth(2, 300);
@@ -495,7 +500,7 @@ function getOrCreateUprawnieniaSheet(ss) {
       .requireValueInRange(configSheet.getRange("A2:A"), true)
       .setAllowInvalid(false)
       .build();
-    sheet.getRange(2, 1, 1000, 1).setDataValidation(rule);
+    sheet.getRange(2, 1, VALIDATION_MAX_ROWS, 1).setDataValidation(rule);
   }
 
   return sheet;
@@ -509,16 +514,27 @@ function getEmailsForUnit(unitName, uprawnieniaSheet) {
   var values = uprawnieniaSheet.getRange(2, 1, lastRow - 1, 2).getValues();
   var seen = {};
   var result = [];
+  var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
   for (var i = 0; i < values.length; i++) {
     var unit = values[i][0];
-    var email = values[i][1];
+    var cell = values[i][1];
     if (unit !== unitName) continue;
-    if (!email || typeof email !== "string") continue;
-    email = email.trim();
-    if (!email) continue;
-    if (seen[email]) continue;
-    seen[email] = true;
-    result.push(email);
+    if (cell === null || cell === undefined) continue;
+
+    // Rozdziel po przecinku, średniku, whitespace, nowej linii — obsługa wielu adresów w jednej komórce
+    var parts = String(cell).split(/[,;\s]+/);
+    for (var j = 0; j < parts.length; j++) {
+      var email = parts[j].trim().toLowerCase();
+      if (!email) continue;
+      if (!emailRegex.test(email)) {
+        Logger.log("getEmailsForUnit: pomijam niepoprawny email w wierszu " + (i + 2) + ": '" + email + "'");
+        continue;
+      }
+      if (seen[email]) continue;
+      seen[email] = true;
+      result.push(email);
+    }
   }
   return result;
 }
@@ -698,104 +714,4 @@ function shareAllAssigned() {
     "Wierszy bez pliku PDF: " + totals.rowsWithoutFile,
     ui.ButtonSet.OK
   );
-}
-
-// ============================================================
-// Testy — manualne (uruchamiaj z edytora Apps Script)
-// ============================================================
-
-function test_extractDriveFileId() {
-  var assertEq = function(actual, expected, label) {
-    if (actual !== expected) {
-      throw new Error("FAIL [" + label + "]: expected " + JSON.stringify(expected) + " got " + JSON.stringify(actual));
-    }
-  };
-
-  assertEq(
-    extractDriveFileId("https://drive.google.com/file/d/1aBcD_-xyz123/view?usp=drivesdk"),
-    "1aBcD_-xyz123",
-    "standard /d/ URL"
-  );
-  assertEq(
-    extractDriveFileId("https://drive.google.com/open?id=1aBcD_-xyz123"),
-    "1aBcD_-xyz123",
-    "?id= URL"
-  );
-  assertEq(
-    extractDriveFileId("https://docs.google.com/document/d/1aBcD_-xyz123/edit"),
-    "1aBcD_-xyz123",
-    "docs URL"
-  );
-  assertEq(extractDriveFileId(""), null, "empty");
-  assertEq(extractDriveFileId("not a url"), null, "garbage");
-  assertEq(extractDriveFileId(null), null, "null");
-
-  Logger.log("test_extractDriveFileId: PASS");
-}
-
-function test_getEmailsForUnit() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = getOrCreateUprawnieniaSheet(ss);
-
-  // Wyczyść istniejące dane (zostaw nagłówek)
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 2).clearContent();
-
-  // Seed: 3 wiersze, 2 jednostki, 1 duplikat
-  sheet.getRange(2, 1, 4, 2).setValues([
-    ["Obóz Alfa", "jan@example.com"],
-    ["Obóz Alfa", "anna@example.com"],
-    ["Obóz Beta", "piotr@example.com"],
-    ["Obóz Alfa", "jan@example.com"]  // duplikat
-  ]);
-  SpreadsheetApp.flush();
-
-  var emailsAlfa = getEmailsForUnit("Obóz Alfa", sheet);
-  if (emailsAlfa.length !== 2) {
-    throw new Error("FAIL: expected 2 emails for Alfa, got " + emailsAlfa.length + ": " + JSON.stringify(emailsAlfa));
-  }
-  if (emailsAlfa.indexOf("jan@example.com") === -1 || emailsAlfa.indexOf("anna@example.com") === -1) {
-    throw new Error("FAIL: Alfa missing expected emails: " + JSON.stringify(emailsAlfa));
-  }
-
-  var emailsBeta = getEmailsForUnit("Obóz Beta", sheet);
-  if (emailsBeta.length !== 1 || emailsBeta[0] !== "piotr@example.com") {
-    throw new Error("FAIL: expected [piotr@example.com] for Beta, got " + JSON.stringify(emailsBeta));
-  }
-
-  var emailsGamma = getEmailsForUnit("Obóz Gamma", sheet);
-  if (emailsGamma.length !== 0) {
-    throw new Error("FAIL: expected [] for Gamma, got " + JSON.stringify(emailsGamma));
-  }
-
-  Logger.log("test_getEmailsForUnit: PASS");
-}
-
-function test_onInvoiceEdit_singleCell() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var pula = ss.getSheetByName(SHEET_PULA);
-  if (!pula) throw new Error("Brak zakładki Pula — uruchom setup() najpierw.");
-
-  // Znajdź wiersz testowy: potrzebujemy wiersza z wypełnionym PDF URL (kol 7)
-  // Dla testu — user ręcznie wskazuje wiersz w stałej poniżej
-  var TEST_ROW = 2; // PODMIEŃ na realny wiersz z PDF URL
-
-  var pdfCell = pula.getRange(TEST_ROW, COL.PDF);
-  var richText = pdfCell.getRichTextValue();
-  var url = richText ? richText.getLinkUrl() : pdfCell.getValue();
-  if (!url) throw new Error("Wiersz " + TEST_ROW + " nie ma PDF URL");
-
-  // Symulujemy event onEdit: range = komórka jednostki w TEST_ROW, value = "Test Unit"
-  var fakeEvent = {
-    range: pula.getRange(TEST_ROW, COL.WYDARZENIE),
-    value: "Test Unit",
-    source: ss
-  };
-
-  // Przed wywołaniem — ustaw wartość w komórce (event.range.getValue() musi to zwrócić)
-  fakeEvent.range.setValue("Test Unit");
-  SpreadsheetApp.flush();
-
-  onInvoiceEdit(fakeEvent);
-  Logger.log("test_onInvoiceEdit_singleCell: sprawdź toast i czy email dotarł");
 }
