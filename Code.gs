@@ -273,7 +273,10 @@ function fetchAllInvoices(config) {
 }
 
 function fetchAndSavePdf(config, folder, invoiceId, fileName) {
-  var safeName = fileName.replace(/[\/\\:*?"<>|]/g, "_") + ".pdf";
+  // invoiceId w nazwie — numer faktury nie jest globalnie unikalny (kolizja = cudzy PDF)
+  var safeBase = String(fileName).replace(/[\/\\:*?"<>|]/g, "_");
+  var safeId = String(invoiceId).replace(/[\/\\:*?"<>|]/g, "_");
+  var safeName = safeBase + "__" + safeId + ".pdf";
 
   var existingUrl = retryOnTransient_(function() {
     var existing = folder.getFilesByName(safeName);
@@ -493,7 +496,6 @@ function getOrCreateUprawnieniaSheet(ss) {
   sheet.setColumnWidth(1, 250);
   sheet.setColumnWidth(2, 300);
 
-  // Dropdown w kolumnie A z listy jednostek z Konfiguracji
   var configSheet = ss.getSheetByName(SHEET_CONFIG);
   if (configSheet) {
     var rule = SpreadsheetApp.newDataValidation()
@@ -522,7 +524,6 @@ function getEmailsForUnit(unitName, uprawnieniaSheet) {
     if (unit !== unitName) continue;
     if (cell === null || cell === undefined) continue;
 
-    // Rozdziel po przecinku, średniku, whitespace, nowej linii — obsługa wielu adresów w jednej komórce
     var parts = String(cell).split(/[,;\s]+/);
     for (var j = 0; j < parts.length; j++) {
       var email = parts[j].trim().toLowerCase();
@@ -605,7 +606,7 @@ function onInvoiceEdit(e) {
 
   var editedCol = e.range.getColumn();
   var editedNumCols = e.range.getNumColumns();
-  // Interesuje nas tylko kolumna WYDARZENIE — albo sam ten edytowany zasięg ją zawiera
+  // reaguj tylko gdy edycja obejmuje kolumnę WYDARZENIE
   if (editedCol > COL.WYDARZENIE || editedCol + editedNumCols - 1 < COL.WYDARZENIE) return;
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -618,10 +619,10 @@ function onInvoiceEdit(e) {
 
   for (var i = 0; i < numRows; i++) {
     var row = startRow + i;
-    if (row < 2) continue; // nagłówek
+    if (row < 2) continue;
 
     var unitName = sheet.getRange(row, COL.WYDARZENIE).getValue();
-    if (!unitName) { totals.rowsSkippedEmptyUnit++; continue; } // pusta wartość — nic nie robimy (no auto-revoke)
+    if (!unitName) { totals.rowsSkippedEmptyUnit++; continue; } // bez jednostki — brak auto-revoke
 
     var pdfCell = sheet.getRange(row, COL.PDF);
     var richText = pdfCell.getRichTextValue();
